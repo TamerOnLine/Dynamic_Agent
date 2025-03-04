@@ -2,9 +2,9 @@ import logging
 from textblob import TextBlob
 from langchain.tools import Tool
 from model.ollama_model import OllamaHandler
-from tools.weather_tool import get_weather
-from tools.stock_tool import get_stock_price
-from tools.internet_search_tool import search_internet
+from tools2.weather_tool import get_weather
+from tools2.stock_tool import get_stock_price
+from tools2.internet_search_tool import search_internet
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')

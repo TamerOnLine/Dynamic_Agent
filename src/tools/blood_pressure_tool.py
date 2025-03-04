@@ -3,7 +3,7 @@ import logging
 from langchain.tools import Tool
 from serpapi import GoogleSearch
 from dotenv import load_dotenv
-from tools.internet_search_tool import search_internet  # Import general search tool
+from tools2.internet_search_tool import search_internet  # Import general search tool
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
