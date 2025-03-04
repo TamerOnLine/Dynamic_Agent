@@ -1,59 +1,48 @@
 import sqlite3
 import datetime
-
-from tools.weather_tool import weather_tool
-from tools.stock_tool import stock_tool
-from tools.custom_tool import custom_tool
-from tools.internet_search_tool import internet_search_tool
-from tools.blood_pressure_tool import blood_pressure_tool 
-from tools.web_scraper_tool import web_scraper_tool
-from tools.advanced_web_scraper import advanced_web_scraper
-
+import logging
 
 from model.ollama_model import OllamaHandler
 from langchain.agents import initialize_agent, AgentType
 
 
 class Agent:
-    """AI agent integrating weather, stock, blood pressure, and other tools using LangChain."""
+    """Intelligent agent utilizing multiple tools via LangChain."""
 
-    def __init__(self):
-        """Initialize the AI agent with tools."""
+    def __init__(self, tools=None):
+        """Initialize the agent with optional dynamic tools."""
         self.handler = OllamaHandler()
-        self.tools = [
-            weather_tool,
-            stock_tool,
-            custom_tool,
-            internet_search_tool,
-            blood_pressure_tool,
-            web_scraper_tool,
-            advanced_web_scraper,
-        ]
+        self.tools = tools if tools else []
 
         self.agent = initialize_agent(
             tools=self.tools,
             llm=self.handler.llm,
             agent=AgentType.ZERO_SHOT_REACT_DESCRIPTION,
             verbose=True,
-            allowed_tools=[
-                "Use the Weather API",
-                "StockPrice",
-                "GeneralResponse",
-                "InternetSearch",
-                "BloodPressureSearch",
-                "WebScraper",
-                "AdvancedWebScraper"
-            ],
+            allowed_tools=[tool.name for tool in self.tools],
             handle_parsing_errors=True,
         )
 
-        # Create SQLite database if it does not exist
+        # Initialize the database
         self.init_db()
 
     def init_db(self):
-        """Create a table to store questions, answers, and tool used."""
+        """Create necessary tables in the database if they do not exist."""
         with sqlite3.connect("chat_history.db") as conn:
             cursor = conn.cursor()
+
+            # Tools table
+            cursor.execute(
+                """
+                CREATE TABLE IF NOT EXISTS tools (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    name TEXT UNIQUE NOT NULL,
+                    description TEXT
+                )
+                """
+            )
+
+            # Chat log table
             cursor.execute(
                 """
                 CREATE TABLE IF NOT EXISTS chat_log (
@@ -61,20 +50,70 @@ class Agent:
                     timestamp TEXT,
                     question TEXT,
                     answer TEXT,
-                    tool_used TEXT
+                    tool_id INTEGER,
+                    FOREIGN KEY (tool_id) REFERENCES tools(id)
                 )
                 """
             )
+
+            # Error log table
+            cursor.execute(
+                """
+                CREATE TABLE IF NOT EXISTS error_log (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    timestamp TEXT,
+                    error_message TEXT,
+                    query TEXT,
+                    tool_id INTEGER,
+                    FOREIGN KEY (tool_id) REFERENCES tools(id)
+                )
+                """
+            )
+
             conn.commit()
 
-    def log_interaction(self, query, response, tool_used):
-        """Log questions, answers, and tool used in the database."""
+    def log_interaction(self, query, response, tool_name):
+        """Log conversations with tool identification."""
         timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         with sqlite3.connect("chat_history.db") as conn:
             cursor = conn.cursor()
+
+            # Retrieve or insert tool_id
+            cursor.execute("SELECT id FROM tools WHERE name = ?", (tool_name,))
+            tool_id = cursor.fetchone()
+
+            if tool_id is None:
+                cursor.execute("INSERT INTO tools (name, description) VALUES (?, ?)",
+                               (tool_name, "Undefined description"))
+                tool_id = cursor.lastrowid
+            else:
+                tool_id = tool_id[0]
+
+            # Log the conversation
             cursor.execute(
-                "INSERT INTO chat_log (timestamp, question, answer, tool_used) VALUES (?, ?, ?, ?)",
-                (timestamp, query, response, tool_used),
+                "INSERT INTO chat_log (timestamp, question, answer, tool_id) VALUES (?, ?, ?, ?)",
+                (timestamp, query, response, tool_id),
+            )
+            conn.commit()
+
+    def log_error(self, query, error_message, tool_name=None):
+        """Log errors occurring during processing."""
+        timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        with sqlite3.connect("chat_history.db") as conn:
+            cursor = conn.cursor()
+
+            # Retrieve tool_id if error is related to a specific tool
+            tool_id = None
+            if tool_name:
+                cursor.execute("SELECT id FROM tools WHERE name = ?", (tool_name,))
+                tool_id = cursor.fetchone()
+                if tool_id:
+                    tool_id = tool_id[0]
+
+            # Insert error log
+            cursor.execute(
+                "INSERT INTO error_log (timestamp, error_message, query, tool_id) VALUES (?, ?, ?, ?)",
+                (timestamp, error_message, query, tool_id),
             )
             conn.commit()
 
@@ -86,31 +125,28 @@ class Agent:
             query (str): User query.
 
         Returns:
-            str: The agent's response.
+            str: Agent response.
         """
         try:
             result = self.agent.invoke(query)
             response = result.get("output", "No response")
-            
-            # Debugging: Print full result to analyze structure
-            print("Full Agent Response:", result)
-            
-            # Extract tool used from the agent's response structure
+
+            # Extract the tool used
             tool_used = "Unknown"
             thought_text = result.get("thought", "")
-            print(f"Processed Thought Text: {thought_text}")  # Debugging log
-            
+
             if "Action:" in thought_text:
                 thought_lines = thought_text.split("\n")
                 for line in thought_lines:
                     if "Action:" in line:
                         tool_used = line.replace("Action:", "").strip()
                         break
-            
-            print(f"Extracted Tool Used: {tool_used}")  # Debugging log
-            
-            self.log_interaction(query, response, tool_used)  # Log the interaction
+
+            self.log_interaction(query, response, tool_used)
             return response
+
         except Exception as e:
-            print(f"Error processing query: {e}")
-            return "An error occurred while processing your request."
+            error_message = str(e)
+            self.log_error(query, error_message)
+            logging.error(f"Error processing query: {error_message}")
+            return "An error occurred while processing your request. Please try again later."

@@ -1,24 +1,18 @@
-import os
-import sys
 import subprocess
+import os
+import logging
 
-def check_python():
-    """Check if Python is installed."""
-    if sys.version_info.major < 3:
-        print("Python 3 is required to run this program.")
-        sys.exit(1)
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(levelname)s - %(message)s"
+)
 
-def install_requirements():
-    """Automatically install required dependencies."""
-    print(" Installing requirements...")
-    subprocess.run([sys.executable, "-m", "pip", "install", "-r", "requirements.txt"], check=True)
+# Define the correct path to main.py
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))  # Project directory
+MAIN_PATH = os.path.join(BASE_DIR, "src", "main.py")  # Full path to main.py
 
-def run_app():
-    """Run the main.py script."""
-    print(" Running main.py ...")
-    subprocess.run([sys.executable, "src/main.py"], check=True)
-
-if __name__ == "__main__":
-    check_python()
-    install_requirements()
-    run_app()
+try:
+    logging.info(f"Running {MAIN_PATH}...")
+    subprocess.run(["python", MAIN_PATH], check=True)
+except subprocess.CalledProcessError as e:
+    logging.error(f"Failed to run main.py: {e}")
